@@ -1,0 +1,23 @@
+{
+  "name": "wtr",
+  "version": "1.0.0",
+  "description": "git worktree shortcut CLI (run via the wtr.sh shell shim)",
+  "private": true,
+  "type": "module",
+  "packageManager": "yarn@1.22.22",
+  "engines": {
+    "node": ">=23.6.0"
+  },
+  "scripts": {
+    "dev": "tsx src/wtr.ts",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "prettier": "^3.9.4",
+    "tsx": "^4.23.0",
+    "typescript": "^7.0.2"
+  }
+}
