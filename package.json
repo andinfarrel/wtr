@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "tsx src/wtr.ts",
+    "test": "node --test src/*.test.ts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

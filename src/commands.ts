@@ -23,21 +23,22 @@ export async function cmdSwitch(): Promise<void> {
   if (target) emitCd(target);
 }
 
-type AddArgs = { branch: string; base: string };
+type AddArgs = { branch: string; base: string; folder?: string };
+const ADD_USAGE = "usage: wtr add <branch> [folder] [-b <base>]";
 
-/** Parse `add` arguments: the first positional is the branch; `-b`/`--from`
- * takes the following token as the base branch. */
 function parseAddArgs(args: string[]): AddArgs {
   const parsed = args.reduce<AddArgs & { expectBase: boolean }>(
     (acc, a) => {
       if (acc.expectBase) return { ...acc, base: a, expectBase: false };
       if (a === "-b" || a === "--from") return { ...acc, expectBase: true };
       if (!acc.branch) return { ...acc, branch: a };
-      return acc;
+      if (acc.folder === undefined) return { ...acc, folder: a };
+      fail(ADD_USAGE);
     },
     { branch: "", base: "", expectBase: false },
   );
-  return { branch: parsed.branch, base: parsed.base };
+  if (parsed.expectBase) fail(ADD_USAGE);
+  return { branch: parsed.branch, base: parsed.base, folder: parsed.folder };
 }
 
 type AddPlan = { addArgs: string[]; message: string };
@@ -75,11 +76,17 @@ function resolveAddPlan(branch: string, base: string, dir: string): AddPlan {
 
 export function cmdAdd(args: string[]): void {
   requireRepo();
-  const { branch, base } = parseAddArgs(args);
-  if (!branch) fail("usage: wtr add <branch> [-b <base>]");
+  const { branch, base, folder } = parseAddArgs(args);
+  if (!branch) fail(ADD_USAGE);
+  if (
+    folder !== undefined &&
+    (!folder || folder === "." || folder === ".." || folder.includes("/"))
+  ) {
+    fail("folder must be a single directory name, not a path");
+  }
 
   const repo = repoName();
-  const dir = join(WTR_ROOT, repo, folderName(branch));
+  const dir = join(WTR_ROOT, repo, folder ?? folderName(branch));
   if (existsSync(dir)) fail(`${shorten(dir)} already exists`);
   mkdirSync(join(WTR_ROOT, repo), { recursive: true });
 
@@ -144,8 +151,8 @@ export function cmdHelp(): void {
       "",
       bold("Usage:"),
       `  ${cyan("wtr switch")}                     Pick a worktree and cd into it   ${dim("(alias: s, default)")}`,
-      `  ${cyan("wtr add <branch>")}               Create a worktree for <branch> and cd into it`,
-      `  ${cyan("wtr add <branch> -b <base>")}     Branch off <base> instead of current HEAD`,
+      `  ${cyan("wtr add <branch> [folder]")}      Create a worktree with an optional custom folder and cd into it`,
+      `  ${cyan("wtr add <branch> [folder] -b <base>")}  Branch off <base> instead of current HEAD`,
       `  ${cyan("wtr list")}                       List worktrees for the current repo   ${dim("(alias: ls)")}`,
       `  ${cyan("wtr remove [-f]")}                Pick a worktree to remove   ${dim("(alias: rm)")}`,
       `  ${cyan("wtr help")}`,

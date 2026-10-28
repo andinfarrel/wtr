@@ -31,8 +31,8 @@ source /path/to/wtr/wtr.sh
 
 ```
 wtr switch                     Pick a worktree and cd into it   (alias: s, default)
-wtr add <branch>               Create a worktree for <branch> and cd into it
-wtr add <branch> -b <base>     Branch off <base> instead of current HEAD
+wtr add <branch> [folder]      Create a worktree with an optional custom folder and cd into it
+wtr add <branch> [folder] -b <base>  Branch off <base> instead of current HEAD
 wtr list                       List worktrees for the current repo   (alias: ls)
 wtr remove [-f]                Pick a worktree to remove   (alias: rm)
 wtr help
@@ -40,11 +40,22 @@ wtr help
 
 `WTR_ROOT` overrides the worktree root (default `~/worktrees`).
 
+To use a custom folder name:
+
+```sh
+wtr add feat/branch-name custom-folder-name
+```
+
+This creates `~/worktrees/<repo>/custom-folder-name` and changes into it.
+The folder must be a single directory name, not a path.
+Without a custom folder, `feat/branch-name` still maps to `feat-branch-name`.
+
 ## Development
 
 ```
 yarn install       # install dev deps
 yarn dev -- list   # run the CLI via tsx (args after --)
+yarn test          # end-to-end CLI and shell tests
 yarn typecheck     # tsc --noEmit
 yarn format        # prettier --write .
 ```
