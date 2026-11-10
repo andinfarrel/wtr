@@ -26,5 +26,8 @@ wtr() {
   fi
   local target
   target="$(WTR_PWD="$PWD" node "$script" "$@")" || return
-  [ -n "$target" ] && [ -d "$target" ] && cd "$target"
+  if [ -n "$target" ]; then
+    cd "$target" || return
+  fi
+  return 0
 }

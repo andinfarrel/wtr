@@ -1,9 +1,14 @@
 import { spawnSync } from "node:child_process";
 import { writeSync } from "node:fs";
 import * as readline from "node:readline";
-import { bold, cyan, dim, yellow } from "./ansi.ts";
-import { dirtySet, type Worktree } from "./git.ts";
-import { fail } from "./io.ts";
+import { bold, cyan, dim } from "./ansi.ts";
+import {
+  scanStatuses,
+  type StatusScan,
+  type Worktree,
+  type WorktreeStatus,
+} from "./git.ts";
+import { fail, statusMarker } from "./io.ts";
 import { shorten } from "./paths.ts";
 
 export function hasFzf(): boolean {
@@ -74,7 +79,7 @@ function scrollTop(sel: number, top: number, vis: number): number {
 
 type ViewState = {
   items: Worktree[];
-  dirty: Set<string>;
+  statuses: Map<string, WorktreeStatus>;
   sel: number;
   top: number;
   query: string;
@@ -103,7 +108,7 @@ function buildView(s: ViewState): { lines: string[]; top: number } {
     const pointer = active ? cyan("❯ ") : "  ";
     const name = w.branch.padEnd(s.width);
     const label = active ? cyan(bold(name)) : bold(name);
-    const marker = s.dirty.has(w.path) ? yellow(" ●") : "  ";
+    const marker = statusMarker(s.statuses.get(w.path));
     return `${pointer}${label}${marker}  ${dim(clipPath(w.path, s.pathBudget))}`;
   });
   return { lines: [header, ...rows], top };
@@ -197,7 +202,6 @@ function reduce(
 
 export function pickInteractive(
   items: Worktree[],
-  dirty: Set<string>,
   prompt: string,
 ): Promise<string | null> {
   return new Promise((resolve) => {
@@ -206,7 +210,12 @@ export function pickInteractive(
     const cols = process.stderr.columns || 80;
     const rows = Math.max(3, (process.stderr.rows || 24) - 2);
     const pathBudget = Math.max(10, cols - (width + 7));
+    const statuses = new Map<string, WorktreeStatus>();
+    const wasRaw = Boolean(stdin.isRaw);
 
+    let scan: StatusScan | undefined;
+    let redraw: NodeJS.Immediate | undefined;
+    let closed = false;
     let state = initState(items);
     let top = 0;
     let drawn = 0;
@@ -215,7 +224,7 @@ export function pickInteractive(
     const render = (): void => {
       const view = buildView({
         items: state.filtered,
-        dirty,
+        statuses,
         sel: state.sel,
         top,
         query: state.query,
@@ -229,28 +238,45 @@ export function pickInteractive(
       writeSync(2, renderFrame(view.lines, drawn));
       drawn = view.lines.length;
       maxDrawn = Math.max(maxDrawn, view.lines.length);
+      scan?.prioritize(
+        state.filtered.slice(top, top + rows - 1).map((w) => w.path),
+      );
     };
 
     const teardown = (): void => {
+      closed = true;
+      if (redraw) clearImmediate(redraw);
+      scan?.cancel();
       writeSync(2, clearFrame(drawn, maxDrawn));
-      stdin.setRawMode(false);
+      stdin.setRawMode(wasRaw);
       stdin.pause();
       stdin.removeListener("keypress", onKey);
+      process.removeListener("SIGINT", onInterrupt);
+      process.removeListener("SIGTERM", onTerminate);
     };
 
+    const finish = (path: string | null, exitCode?: number): void => {
+      if (closed) return;
+      teardown();
+      void (scan?.done ?? Promise.resolve()).then(() => {
+        if (exitCode !== undefined) process.exit(exitCode);
+        resolve(path);
+      });
+    };
+
+    const onInterrupt = (): void => finish(null, 130);
+    const onTerminate = (): void => finish(null, 143);
+
     const onKey = (str: string, key: readline.Key): void => {
-      if (!key) return;
+      if (!key || closed) return;
       const result = reduce(state, items, str, key);
       switch (result.type) {
         case "exit":
-          teardown();
-          return process.exit(130);
+          return onInterrupt();
         case "select":
-          teardown();
-          return resolve(result.path);
+          return finish(result.path);
         case "cancel":
-          teardown();
-          return resolve(null);
+          return finish(null);
         case "update":
           if (result.state !== state) {
             state = result.state;
@@ -266,6 +292,26 @@ export function pickInteractive(
     writeSync(2, "\x1b[?25l"); // hide cursor
     render();
     stdin.on("keypress", onKey);
+    process.once("SIGINT", onInterrupt);
+    process.once("SIGTERM", onTerminate);
+    scan = scanStatuses(
+      items.map((w) => w.path),
+      (path, status) => {
+        statuses.set(path, status);
+        if (
+          !redraw &&
+          state.filtered.slice(top, top + rows - 1).some((w) => w.path === path)
+        ) {
+          redraw = setImmediate(() => {
+            redraw = undefined;
+            if (!closed) render();
+          });
+        }
+      },
+    );
+    scan.prioritize(
+      state.filtered.slice(top, top + rows - 1).map((w) => w.path),
+    );
   });
 }
 
@@ -276,8 +322,7 @@ export async function pickItems(
 ): Promise<string | null> {
   if (hasFzf()) return pickWithFzf(items, prompt);
   if (process.stdin.isTTY) {
-    const dirty = await dirtySet(items.map((w) => w.path));
-    return pickInteractive(items, dirty, prompt);
+    return pickInteractive(items, prompt);
   }
   fail("no interactive terminal (install fzf or run inside a terminal)");
 }

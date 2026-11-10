@@ -20,7 +20,7 @@ async function main(): Promise<void> {
     case "list":
     case "ls":
     case "l":
-      await cmdList();
+      await cmdList(rest);
       break;
     case "remove":
     case "rm":

@@ -1,4 +1,4 @@
-import { execFile, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { basename } from "node:path";
 import { fail } from "./io.ts";
 
@@ -66,21 +66,82 @@ export function listWorktrees(): Worktree[] {
   return parseWorktrees(git(["worktree", "list", "--porcelain"]).stdout);
 }
 
-export async function dirtySet(paths: string[]): Promise<Set<string>> {
-  const results = await Promise.all(
-    paths.map(
-      (p) =>
-        new Promise<string | null>((resolve) => {
-          execFile(
-            "git",
-            ["-C", p, "status", "--porcelain"],
-            { maxBuffer: 16 * 1024 * 1024 },
-            (error, stdout) => {
-              resolve(!error && stdout.trim().length > 0 ? p : null);
-            },
+export type WorktreeStatus = "clean" | "dirty" | "unknown";
+
+export type StatusScan = {
+  done: Promise<void>;
+  prioritize: (paths: string[]) => void;
+  cancel: () => void;
+};
+
+export function scanStatuses(
+  paths: string[],
+  onStatus: (path: string, status: WorktreeStatus) => void,
+  options: { concurrency?: number; timeout?: number } = {},
+): StatusScan {
+  const controller = new AbortController();
+  const concurrency = Math.max(1, options.concurrency ?? 4);
+  let pending = [...new Set(paths)];
+  let active = 0;
+  let complete: () => void;
+  const done = new Promise<void>((resolve) => {
+    complete = resolve;
+  });
+
+  const pump = (): void => {
+    while (
+      !controller.signal.aborted &&
+      active < concurrency &&
+      pending.length
+    ) {
+      const path = pending.shift()!;
+      active++;
+      let dirty = false;
+      let failed = false;
+      const child = spawn("git", ["-C", path, "status", "--porcelain"], {
+        env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: options.timeout ?? 10_000,
+        signal: controller.signal,
+      });
+      child.stdout?.on("data", (chunk: Buffer) => {
+        if (chunk.length) dirty = true;
+      });
+      child.on("error", () => {
+        failed = true;
+      });
+      child.on("close", (code) => {
+        active--;
+        if (!controller.signal.aborted) {
+          onStatus(
+            path,
+            failed || child.killed || code !== 0
+              ? "unknown"
+              : dirty
+                ? "dirty"
+                : "clean",
           );
-        }),
-    ),
-  );
-  return new Set(results.filter((p): p is string => p !== null));
+        }
+        pump();
+      });
+    }
+    if (!active && (!pending.length || controller.signal.aborted)) complete();
+  };
+
+  queueMicrotask(pump);
+  return {
+    done,
+    prioritize: (paths) => {
+      const priority = new Set(paths);
+      pending = [
+        ...pending.filter((path) => priority.has(path)),
+        ...pending.filter((path) => !priority.has(path)),
+      ];
+    },
+    cancel: () => {
+      controller.abort();
+      pending = [];
+      if (!active) complete();
+    },
+  };
 }

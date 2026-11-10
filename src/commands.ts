@@ -3,15 +3,16 @@ import { join } from "node:path";
 import { bold, cyan, dim, green, yellow } from "./ansi.ts";
 import { CALLER_PWD, WTR_ROOT } from "./config.ts";
 import {
-  dirtySet,
   git,
   gitOk,
   gitRun,
   listWorktrees,
   repoName,
   requireRepo,
+  scanStatuses,
+  type WorktreeStatus,
 } from "./git.ts";
-import { emitCd, err, fail, promptTty } from "./io.ts";
+import { emitCd, err, fail, promptTty, statusMarker } from "./io.ts";
 import { folderName, shorten } from "./paths.ts";
 import { pickItems } from "./picker.ts";
 
@@ -98,16 +99,28 @@ export function cmdAdd(args: string[]): void {
   emitCd(dir);
 }
 
-export async function cmdList(): Promise<void> {
+export async function cmdList(args: string[] = []): Promise<void> {
+  if (args.some((arg) => arg !== "--status"))
+    fail("usage: wtr list [--status]");
+  requireRepo();
   const items = listWorktrees();
   if (!items.length) {
     err(dim("(no worktrees)"));
     return;
   }
-  const dirty = await dirtySet(items.map((w) => w.path));
+  const statuses = new Map<string, WorktreeStatus>();
+  const withStatus = args.includes("--status");
+  if (withStatus) {
+    await scanStatuses(
+      items.map((w) => w.path),
+      (path, status) => {
+        statuses.set(path, status);
+      },
+    ).done;
+  }
   const width = Math.max(6, ...items.map((w) => w.branch.length));
   const rows = items.map((w) => {
-    const marker = dirty.has(w.path) ? yellow(" ●") : "  ";
+    const marker = withStatus ? statusMarker(statuses.get(w.path)) : "";
     return `${bold(w.branch.padEnd(width))}${marker}  ${dim(shorten(w.path))}`;
   });
   err(rows.join("\n"));
@@ -153,9 +166,11 @@ export function cmdHelp(): void {
       `  ${cyan("wtr switch")}                     Pick a worktree and cd into it   ${dim("(alias: s, default)")}`,
       `  ${cyan("wtr add <branch> [folder]")}      Create a worktree with an optional custom folder and cd into it`,
       `  ${cyan("wtr add <branch> [folder] -b <base>")}  Branch off <base> instead of current HEAD`,
-      `  ${cyan("wtr list")}                       List worktrees for the current repo   ${dim("(alias: ls)")}`,
+      `  ${cyan("wtr list [--status]")}            List worktrees; optionally check for changes   ${dim("(alias: ls)")}`,
       `  ${cyan("wtr remove [-f]")}                Pick a worktree to remove   ${dim("(alias: rm)")}`,
       `  ${cyan("wtr help")}`,
+      "",
+      dim("Status: ● dirty   · checking   ? unavailable"),
     ].join("\n"),
   );
 }

@@ -1,5 +1,19 @@
 import { closeSync, openSync, readSync, writeSync } from "node:fs";
-import { red } from "./ansi.ts";
+import { dim, red, yellow } from "./ansi.ts";
+import type { WorktreeStatus } from "./git.ts";
+
+export function statusMarker(status: WorktreeStatus | undefined): string {
+  switch (status) {
+    case "dirty":
+      return yellow(" ●");
+    case "clean":
+      return "  ";
+    case "unknown":
+      return yellow(" ?");
+    default:
+      return dim(" ·");
+  }
+}
 
 export function err(msg: string): void {
   writeSync(2, msg + "\n");

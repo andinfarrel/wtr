@@ -26,6 +26,9 @@ source /path/to/wtr/wtr.sh
 ```
 
 `fzf` is used for the interactive picker when present; otherwise a built-in picker is shown: ↑/↓ to move, type to filter by branch name, enter to select, esc to cancel.
+The built-in picker opens before checking for changes and updates status markers in the background.
+Markers mean `●` dirty, `·` checking, and `?` unavailable.
+Checks include staged changes, unstaged changes, and untracked files.
 
 ## Usage
 
@@ -34,11 +37,14 @@ wtr switch                     Pick a worktree and cd into it   (alias: s, defau
 wtr add <branch> [folder]      Create a worktree with an optional custom folder and cd into it
 wtr add <branch> [folder] -b <base>  Branch off <base> instead of current HEAD
 wtr list                       List worktrees for the current repo   (alias: ls)
+wtr list --status              Include dirty-file markers
 wtr remove [-f]                Pick a worktree to remove   (alias: rm)
 wtr help
 ```
 
 `WTR_ROOT` overrides the worktree root (default `~/worktrees`).
+Plain `wtr list` does not scan worktree contents.
+Use `--status` when you want to wait for status checks.
 
 To use a custom folder name:
 
